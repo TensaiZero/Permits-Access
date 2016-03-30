@@ -1,0 +1,578 @@
+Public Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+Option Compare Database
+Function updatedb()
+    Dim varreturn As Variant
+    Dim sqls As String
+    Dim splt() As String
+    Dim isdate As String
+    Dim lsdate As String
+    Dim dtpr As Date
+    Dim db As DAO.Database
+    Dim rs As DAO.Recordset
+    
+    Set db = CurrentDb
+    'Get Last Run Date
+    sqls = "select [value] from Settings where [name] = 'LastDate'"
+    Set rs = db.OpenRecordset(sqls, dbOpenSnapshot)
+    dtpr = rs.Fields(0).Value
+    varreturn = SysCmd(acSysCmdSetStatus, "Last Date Opened: " & dtpr)
+    If dtpr = Date Then
+        MsgBox "Latest Items are already fetched"
+        Exit Function
+    End If
+    
+    Do Until dtpr = Date - 1
+        lsdate = dtpr
+        splt() = Split(lsdate, "/")
+        If Len(splt(0)) = 1 Then
+            splt(0) = "0" & splt(0)
+        End If
+        If Len(splt(1)) = 1 Then
+            splt(1) = "0" & splt(1)
+        End If
+        isdate = splt(2) & "-" & splt(0) & "-" & splt(1) & "T00:00:00"
+        get_values isdate, dtpr
+        dtpr = dtpr + 1
+        If dtpr > Date Then
+            Exit Do
+        End If
+    Loop
+    
+    varreturn = SysCmd(acSysCmdSetStatus, "Done")
+    MsgBox "Done"
+End Function
+
+Private Sub get_values(ByVal issdte As String, ByVal dtpr As Date)
+    Dim lnk1 As String
+    Dim lnk2 As String
+    Dim lnk3 As String
+    Dim hdoc As New HTMLDocument
+    Dim sqls As String
+    Dim url As String
+    Dim http As Object
+    Dim splt() As String
+    Dim splt2() As String
+    Dim el
+    Dim el2 As HTMLTableSection
+    Dim rel As String
+    Dim eml As String
+    
+    Dim cnt As Long
+    Dim doccnt As Long
+    
+    Dim db As DAO.Database
+    Dim rs As DAO.Recordset
+    Dim rs1 As DAO.Recordset
+    Dim qtfrst As Long
+    Dim qtlast As Long
+    Dim cmloc As Long
+    Set db = CurrentDb
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    '2015-03-15T00:00:00
+    url = "https://data.cityofnewyork.us/resource/4qi9-uvsb.csv?issuance_date=" & issdte
+    
+        http.Open "GET", url, True
+        http.Send
+    
+    varreturn = SysCmd(acSysCmdSetStatus, "Fetching Data (" & dtpr & ")")
+    
+    Do Until http.readystate = 4
+    DoEvents: Loop
+    
+    Sleep (5000)
+    
+    splt() = Split(http.responsetext, Chr(10))
+    If http.responsetext = "" Then
+        Exit Sub
+    End If
+    cnt = 1
+    doccnt = UBound(splt(), 1)
+    varreturn = SysCmd(acSysCmdSetStatus, "Item Found(" & dtpr & "): " & doccnt - 1)
+    Do Until cnt = doccnt
+        varreturn = SysCmd(acSysCmdSetStatus, "Processing(" & dtpr & "):" & cnt & "/" & doccnt - 1)
+        
+        qtfrst = InStr(1, splt(cnt), Chr(34), vbTextCompare)
+        
+        If qtfrst > 0 Then
+            Do Until qtfrst = 0
+                qtlast = InStr(qtfrst + 1, splt(cnt), Chr(34), vbTextCompare)
+                cmloc = InStr(1, Mid(splt(cnt), qtfrst, qtlast - qtfrst), ",", vbTextCompare)
+                Do Until cmloc = 0
+                    Mid(splt(cnt), qtfrst + cmloc - 1, 1) = "."
+                    cmloc = InStr(1, Mid(splt(cnt), qtfrst, qtlast - qtfrst), ",", vbTextCompare)
+                Loop
+                qtfrst = InStr(qtlast + 1, splt(cnt), Chr(34), vbTextCompare)
+            Loop
+        End If
+        
+        splt2() = Split(splt(cnt), ",")
+        'Convert to Proper Case
+        splt2(3) = StrConv(splt2(3), vbProperCase)
+        splt2(17) = StrConv(splt2(17), vbProperCase)
+        splt2(18) = StrConv(splt2(18), vbProperCase)
+        splt2(3) = Replace(splt2(3), "'", ".")
+        splt2(17) = Replace(splt2(17), "'", ".")
+        splt2(18) = Replace(splt2(18), "'", ".")
+        'Check if duplicate data
+        sqls = "select [job_number] from Permits where [block] = " & "'" & splt2(5) & "'" & _
+        " and [Lot] = " & "'" & splt2(6) & "'" & " and [first_Name] = " & "'" & splt2(17) & "'" & "and [last_Name] = " & "'" & splt2(18) & "'"
+        Set rs1 = db.OpenRecordset(sqls)
+        If rs1.RecordCount = 0 Then
+            'No Duplicate Found
+            'Get Relationship to owner and Email Ad
+            'url = "http://a810-bisweb.nyc.gov/bisweb/JobsQueryByNumberServlet?passjobnumber=" & _
+            '       splt2(1) & "&passdocnumber=&go10=+GO+&requestid=0"
+            
+            'On Error GoTo next_item
+            '    http.Open "GET", url, True
+            '    http.Send
+            'On Error GoTo 0
+            'varreturn = SysCmd(acSysCmdSetStatus, "Fetching JobNumber Details(" & dtpr & "):" & cnt & "/" & doccnt - 1)
+            
+            'Dim times As Long
+            'times = 1
+            'Do Until http.readystate = 4
+            'DoEvents:
+            'Loop
+            'If http.readystate <> 4 Then
+            '    GoTo next_item
+            'End If
+            'If http.responsetext = "" Then
+            ' GoTo next_item
+            'End If
+            'hdoc.body.innerHTML = http.responsetext
+            
+            'el = hdoc.body
+            'Set el = hdoc.getElementsByTagName("Tbody")
+            
+            'Set el2 = el.Item(39)
+            'For Each el2 In el
+            '    If InStr(1, el2.outerText, "26  Owner's Information", vbTextCompare) > 0 Then
+                'If Left(el2.outerText, 3) = " 26" Then
+            '        rel = el2.rows(3).cells(1).outerText
+            '        rel = Replace(rel, "'", "")
+            '        eml = el2.rows(6).cells(1).outerText
+                    'check if email is already there
+            '        sqls = "select [job_number] from Permits where [email_address] = " & "'" & eml & "'"
+            '        Set rs = db.OpenRecordset(sqls)
+            '        If rs.RecordCount > 0 Then
+            '            eml = "Duplicate"
+            '        End If
+            '        Exit For
+            '    End If
+            'Next el2
+            
+            'Insert Values to Access
+            Set rs = db.OpenRecordset("Permits")
+            rs.AddNew
+            rs.Fields("borough") = splt2(0)
+rs.Fields("bin") = splt2(1)
+rs.Fields("house__") = splt2(2)
+rs.Fields("street_name") = splt2(3)
+rs.Fields("job_number") = splt2(4)
+rs.Fields("block") = splt2(5)
+rs.Fields("lot") = splt2(6)
+rs.Fields("zip_code") = splt2(7)
+rs.Fields("bldg_type") = splt2(8)
+rs.Fields("residential") = splt2(9)
+rs.Fields("permit_status") = splt2(10)
+rs.Fields("filling_status") = splt2(11)
+rs.Fields("filling_date") = splt2(12)
+rs.Fields("issuance_date") = splt2(13)
+rs.Fields("owner_s_business_type") = splt2(14)
+rs.Fields("non_profit") = splt2(15)
+rs.Fields("owner_s_business_name") = splt2(16)
+rs.Fields("first_name") = splt2(17)
+rs.Fields("last_name") = splt2(18)
+rs.Fields("owner_s_house__") = splt2(19)
+rs.Fields("owner_s_house_street_name") = splt2(20)
+rs.Fields("city") = splt2(21)
+rs.Fields("state") = splt2(22)
+rs.Fields("owner_s_zip_code") = splt2(23)
+rs.Fields("owner_s_phone") = splt2(24)
+rs.Fields("dobrundate") = splt2(25)
+lnk1 = "http://streeteasy.com/search?search=" & rs.Fields("house__") & rs.Fields("street_name")
+lnk2 = "http://streeteasy.com/search?search=" & rs.Fields("first_name") & rs.Fields("last_name")
+lnk1 = Replace(lnk1, " ", "+")
+lnk2 = Replace(lnk2, " ", "+")
+            Set el = rs.Fields("Bldg_Link")
+            'rs.Fields("Relationship") = splt2(26)
+            'rs.Fields("Email_Address") = splt2(27)
+            'rs.Fields("Email_type") = splt2(28)
+            rs.Fields("Bldg_Link").Value = "Bldg#" & lnk1 & "#"
+            rs.Fields("Owner_Link").Value = "Owner#" & lnk2 & "#"
+            
+            lnk3 = "http://a810-bisweb.nyc.gov/bisweb/JobsQueryByNumberServlet?passjobnumber=" & _
+                rs.Fields("Job_number") & "&passdocnumber=&go10=+GO+&requestid=0"
+            rs.Fields("Permit_Link").Value = "Permit#" & lnk3 & "#"
+            
+            rs.Update
+            RefreshDatabaseWindow
+            'sqls = "insert into permits values (" & "'" & splt2(0) & "','" & splt2(1) & "','" & splt2(2) & "','" & splt2(3) & "','" & splt2(4) & "','" & splt2(5) & "','" & splt2(6) & "','"
+            'sqls = sqls & splt2(7) & "','" & splt2(8) & "','" & splt2(9) & "','" & splt2(10) & "','" & splt2(11) & "','" & splt2(12) & "','" & splt2(13) & "','" & splt2(14) & "','" & splt2(15) & "','"
+            'sqls = sqls & splt2(16) & "','" & splt2(17) & "','" & splt2(18) & _
+            '        "','" & splt2(19) & "','" & splt2(20) & "','" & splt2(21) & "','" & splt2(22) & "','" & splt2(23) & "','" & splt2(24) & "','" & splt2(25) & "','" & splt2(26) & "')"
+            'db.Execute (sqls)
+        End If
+next_item:
+        cnt = cnt + 1
+    Loop
+    sqls = "UPDATE Settings SET [Value] = '" & Date & "' WHERE [Name] = 'LastDate'"
+    DoCmd.SetWarnings False
+    DoCmd.RunSQL sqls
+    DoCmd.SetWarnings True
+    
+
+
+End Sub
+Function sendmail()
+'    MsgBox "Mail Sent"
+Dim db As DAO.Database
+Dim rs As DAO.Recordset
+Dim sqls As String
+Dim ctrl
+Dim fname As String
+Dim fileloc As String
+Dim el
+
+DoCmd.Save acTable, "Permits"
+
+Set ctrl = Screen.ActiveDatasheet
+
+Set el = Screen.ActiveDatasheet.Recordset
+If el.Fields("Email_Type") <> "" Then
+    If el.Fields("Email_Type") = "Rent" Then
+        fname = "Rent.oft"
+    ElseIf el.Fields("Email_Type") = "Sell" Then
+        fname = "Sell.oft"
+    Else
+        fname = "Sell or Rent.oft"
+    End If
+Else
+    MsgBox "Please set email type"
+    Exit Function
+End If
+
+
+
+'sqls = "select [value] from Settings where [name] = 'TemplateLoc'"
+'Set db = CurrentDb
+'    Set rs = db.OpenRecordset(sqls, dbOpenSnapshot)
+'    fileloc = rs.Fields(0).Value
+'    fileloc = fileloc & fname
+    fileloc = CurrentProject.Path & "\" & fname
+Dim myOlApp As Outlook.Application
+Dim houseno As String
+Dim frstname As String
+Dim strtname As String
+    Dim MyItem As Outlook.MailItem
+    Set myOlApp = CreateObject("Outlook.Application")
+    Set MyItem = myOlApp.CreateItemFromTemplate(fileloc)
+    
+    'houseno = Replace(el.Fields("house__"), " ", "")
+    houseno = Trim(el.Fields("house__"))
+    frstname = Trim(el.Fields("first_name"))
+    strtname = Trim(el.Fields("street_name"))
+    MyItem.body = Replace(MyItem.body, "[FirstName]", frstname, 1)
+    MyItem.Subject = Replace(MyItem.ConversationTopic, "[House Number] [Street Name}", houseno & " " & strtname, 1)
+    MyItem.To = el.Fields("email_address")
+    MyItem.display
+    
+End Function
+Function fetch_jobdetails()
+    Processing.Show
+End Function
+Function exprt_csv()
+Dim ctrl
+Dim el
+Dim fname As String
+Dim fileloc As String
+Dim rw As Long
+Dim db As DAO.Database
+Dim rs As Recordset
+Dim sqls As String
+Dim lne As String
+Set fs = CreateObject("Scripting.FileSystemObject")
+
+    sqls = "select * from permits where [export] = 'Yes'"
+    'Set fd = Application.FileDialog(msoFileDialogSaveAs)
+DoCmd.Save acTable, "Permits"
+Set db = CurrentDb
+Set rs = db.OpenRecordset(sqls)
+
+'Set intial filename
+    fileloc = CurrentProject.Path
+    fname = "export" & Format(Date, "mmddyyyy") & ".csv"
+    fileloc = fileloc & "\" & fname
+    Set a = fs.CreateTextFile(fileloc, True)
+    lne = "Email,Street Number,Street Name,First Name,Last Name"
+    a.writeline (lne)
+    'DoCmd.TransferText acExportDelim, , "tmpExport", fileloc, False
+'db.QueryDefs.Delete "tmpExport"
+'db.Close
+
+
+'fname = Now()
+'fname = Replace(fname, "AM", "")
+'fname = Replace(fname, ":", "")
+'fname = Replace(fname, "/", "")
+'fname = Replace(fname, " ", "")
+'Set ctrl = Screen.ActiveDatasheet
+'Set el = Screen.ActiveDatasheet.Recordset
+'Set wb = Workbooks.Add
+'Set ws = wb.ActiveSheet
+'ws.Name = fname
+'ws.Range("A1").Value = "Street Number"
+'ws.Range("B1").Value = "Street Name"
+'ws.Range("C1").Value = "First Name"
+'ws.Range("D1").Value = "Last Name"
+'ws.Range("E1").Value = "Email"
+'rw = 2
+Dim houseno As String
+Dim street_name As String
+Dim frstname As String
+Dim lstname As String
+
+If rs.RecordCount = 0 Then
+    MsgBox "No items found"
+    Exit Function
+End If
+
+
+If Not (rs.BOF And rs.EOF) Then
+    Do Until rs.EOF = True
+        DoEvents
+        lne = ""
+        houseno = Trim(rs.Fields("house__"))
+        street_name = Trim(rs.Fields("street_name"))
+        frstname = Trim(rs.Fields("first_name"))
+        lstname = Trim(rs.Fields("last_name"))
+        
+        lne = rs.Fields("email_address") & "," & houseno & "," & street_name & "," & frstname & "," & lstname
+        'lne = rs.Fields("house__") & "," & rs.Fields("street_name") & "," & _
+        '        rs.Fields("first_name") & "," & rs.Fields("last_name") _
+        '        & "," & rs.Fields("email_address")
+        'ws.Range("A" & rw).Value = rs.Fields("house__")
+        'ws.Range("B" & rw).Value = rs.Fields("street_name")
+        'ws.Range("C" & rw).Value = rs.Fields("first_name")
+        'ws.Range("D" & rw).Value = rs.Fields("last_name")
+        'ws.Range("E" & rw).Value = rs.Fields("email_address")
+        a.writeline (lne)
+        rs.movenext
+        rw = rw + 1
+    Loop
+End If
+    'ws.Columns("A:E").EntireColumn.AutoFit
+    'wb.SaveAs FileName:=fileloc, FileFormat:= _
+    '           xlCSV, CreateBackup:=False
+    'wb.Save
+    'wb.Close
+    a.Close
+MsgBox fileloc & " is created"
+
+End Function
+Private Sub fetch_job()
+Dim hdoc As New HTMLDocument
+    Dim sqls As String
+    Dim url As String
+    Dim http As Object
+    Dim splt() As String
+    Dim splt2() As String
+    Dim el
+    Dim el2 As HTMLTableSection
+    Dim rel As String
+    Dim eml As String
+    
+    Dim cnt As Long
+    Dim doccnt As Long
+    
+    Dim db As DAO.Database
+    Dim rs As DAO.Recordset
+    Set db = CurrentDb
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    
+    sqls = "SELECT * from Permits"
+    Set rs = db.OpenRecordset(sqls)
+    Dim x As Long
+    If Not (rs.BOF And rs.EOF) Then
+        Do Until rs.EOF = True
+            'DoCmd.OpenForm "Processing", acNormal
+            Processing.Show
+            DoEvents
+            varreturn = SysCmd(acSysCmdSetStatus, "Processing JobNumber: " & rs("Job_Number"))
+            url = "http://a810-bisweb.nyc.gov/bisweb/JobsQueryByNumberServlet?passjobnumber=" & _
+                   rs("Job_Number") & "&passdocnumber=&go10=+GO+&requestid=0"
+            If IsNull(rs("Relationship").Value) Or IsNull(rs("Email_address").Value) _
+               Or rs("Relationship").Value = "Can't open page" Or rs("Email_address").Value = "Can't open page" Then
+                On Error GoTo url_err
+                http.Open "GET", url, True
+                http.Send
+                On Error GoTo 0
+                Do Until http.readystate = 4
+                DoEvents:
+                Loop
+                If http.responsetext = "" Then GoTo url_err
+                hdoc.body.innerHTML = http.responsetext
+                Set el = hdoc.getElementsByTagName("Tbody")
+                For Each el2 In el
+                    DoEvents
+                    If InStr(1, el2.outerText, "26  Owner's Information", vbTextCompare) > 0 Then
+                        rel = el2.rows(3).cells(1).outerText
+                        rel = Replace(rel, "'", "")
+                        eml = el2.rows(6).cells(1).outerText
+                    'check if email is already there
+                        sqls = "select [job_number] from Permits where [email_address] = " & "'" & eml & "'"
+                        Set rs2 = db.OpenRecordset(sqls)
+                        If rs2.RecordCount > 0 Then
+                            eml = "Duplicate"
+                        End If
+                        Exit For
+                    End If
+                Next el2
+                
+                rs.Edit
+                If rel <> "" Then
+                    rs("Relationship") = rel
+                Else
+                    rs("Relationship") = "Not Found in page"
+                End If
+                If eml <> "" Then
+                    rs("Email_address") = eml
+                Else
+                    rs("Email_address") = "Not Found in page"
+                End If
+                rs.Update
+                DoCmd.Save acTable, "Permits"
+                eml = ""
+                rel = ""
+            End If
+movenext:
+            rs.movenext
+        Loop
+    End If
+        MsgBox "Done"
+        Exit Function
+url_err:
+        rs.Edit
+        rs("Relationship") = "Can't open page"
+        rs("Email_address") = "Can't open page"
+        rs.Update
+        GoTo movenext
+End Sub
+
+Private Sub fix_values()
+Dim sqls As String
+    Dim url As String
+    Dim http As Object
+    Dim splt() As String
+    Dim splt2() As String
+    Dim el
+    Dim el2 As HTMLTableSection
+    Dim rel As String
+    Dim eml As String
+    
+    Dim cnt As Long
+    Dim doccnt As Long
+    Dim db As DAO.Database
+    Dim rs As DAO.Recordset
+    Set db = CurrentDb
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    
+    Dim qtfrst As Long
+    Dim qtlast As Long
+    Dim cmloc As Long
+    
+    sqls = "SELECT * from Permits"
+    Set rs = db.OpenRecordset(sqls)
+    Dim x As Long
+    x = 0
+    If Not (rs.BOF And rs.EOF) Then
+        Do Until rs.EOF = True
+            x = x + 1
+            
+            If Len(rs.Fields("owner_s_phone")) < 10 Then
+            url = "https://data.cityofnewyork.us/resource/4qi9-uvsb.csv?job__=" & rs("Job_Number")
+
+            http.Open "GET", url, True
+            http.Send
+    
+            Do Until http.readystate = 4
+            DoEvents: Loop
+
+            splt() = Split(http.responsetext, Chr(10))
+            If http.responsetext = "" Then
+                Exit Sub
+            End If
+            cnt = 1
+            qtfrst = InStr(1, splt(cnt), Chr(34), vbTextCompare)
+            
+            If qtfrst > 0 Then
+                Do Until qtfrst = 0
+                    qtlast = InStr(qtfrst + 1, splt(cnt), Chr(34), vbTextCompare)
+                    cmloc = InStr(1, Mid(splt(cnt), qtfrst, qtlast - qtfrst), ",", vbTextCompare)
+                    Do Until cmloc = 0
+                        Mid(splt(cnt), qtfrst + cmloc - 1, 1) = "."
+                        cmloc = InStr(1, Mid(splt(cnt), qtfrst, qtlast - qtfrst), ",", vbTextCompare)
+                    Loop
+                    qtfrst = InStr(qtlast + 1, splt(cnt), Chr(34), vbTextCompare)
+                Loop
+            End If
+            splt2() = Split(splt(cnt), ",")
+            'Convert to Proper Case
+            splt2(3) = StrConv(splt2(3), vbProperCase)
+            splt2(17) = StrConv(splt2(17), vbProperCase)
+            splt2(18) = StrConv(splt2(18), vbProperCase)
+            splt2(3) = Replace(splt2(3), "'", ".")
+            splt2(17) = Replace(splt2(17), "'", ".")
+            splt2(18) = Replace(splt2(18), "'", ".")
+    
+            
+            rs.Edit
+            rs.Fields("borough") = splt2(0)
+            rs.Fields("bin") = splt2(1)
+            rs.Fields("house__") = splt2(2)
+            rs.Fields("street_name") = splt2(3)
+            rs.Fields("job_number") = splt2(4)
+            rs.Fields("block") = splt2(5)
+            rs.Fields("lot") = splt2(6)
+            rs.Fields("zip_code") = splt2(7)
+            rs.Fields("bldg_type") = splt2(8)
+            rs.Fields("residential") = splt2(9)
+            rs.Fields("permit_status") = splt2(10)
+            rs.Fields("filling_status") = splt2(11)
+            rs.Fields("filling_date") = splt2(12)
+            rs.Fields("issuance_date") = splt2(13)
+            rs.Fields("owner_s_business_type") = splt2(14)
+            rs.Fields("non_profit") = splt2(15)
+            rs.Fields("owner_s_business_name") = splt2(16)
+            rs.Fields("first_name") = splt2(17)
+            rs.Fields("last_name") = splt2(18)
+            rs.Fields("owner_s_house__") = splt2(19)
+            rs.Fields("owner_s_house_street_name") = splt2(20)
+            rs.Fields("city") = splt2(21)
+            rs.Fields("state") = splt2(22)
+            rs.Fields("owner_s_zip_code") = splt2(23)
+            rs.Fields("owner_s_phone") = splt2(24)
+            rs.Fields("dobrundate") = splt2(25)
+            lnk1 = "http://streeteasy.com/search?search=" & rs.Fields("house__") & rs.Fields("street_name")
+            lnk2 = "http://streeteasy.com/search?search=" & rs.Fields("first_name") & rs.Fields("last_name")
+            lnk1 = Replace(lnk1, " ", "+")
+            lnk2 = Replace(lnk2, " ", "+")
+            rs.Fields("Bldg_Link").Value = "Bldg#" & lnk1 & "#"
+            rs.Fields("Owner_Link").Value = "Owner#" & lnk2 & "#"
+            rs.Update
+            DoCmd.Save acTable, "Permits"
+            End If
+            'lnk3 = "http://a810-bisweb.nyc.gov/bisweb/JobsQueryByNumberServlet?passjobnumber=" & _
+            '       rs.Fields("Job_number") & "&passdocnumber=&go10=+GO+&requestid=0"
+            'rs.Edit
+            'rs.Fields("Permit_Link").Value = "Permit#" & lnk3 & "#"
+            'rs.Update
+            'DoCmd.Save acTable, "Permits"
+            rs.movenext
+            varreturn = SysCmd(acSysCmdSetStatus, "Processing Count: " & x)
+        Loop
+        MsgBox "Done"
+    End If
+End Sub
+
